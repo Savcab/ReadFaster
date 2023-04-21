@@ -1,5 +1,6 @@
-// Returns the HTML version of a paragraph in bionics reading version
-async function applyBionics(text) {
+// Returns the HTML version of a paragraph in bionics reading version with the help of an API
+// Should NOT be used outside processTextNode, because this itself doesn't give it the wrapping span class it should have
+async function applyBionicswithAPI(text) {
   const encodedParams = new URLSearchParams();
   encodedParams.append("content", text);
   encodedParams.append("response_type", "html");
@@ -22,17 +23,47 @@ async function applyBionics(text) {
       if(!response.ok){
         throw new Error("API request for bionic translation response was invalid");
       }
-      console.log(response);
       return response;
     })
     .catch(err => {
       console.error(err);
     });
-  console.log(response)
-
   const responseText = await response.text();
+  console.log(responseText);
   return responseText;
+}
 
+// My attempt to reverse engineer the bionics reading algorithm
+async function applyBionics(text) {
+  // ratios of splitting the word
+  const RATIO = 0.5;
+
+  // Split the paragraph into words using spaces
+  const words = text.split(' ');
+
+  // Iterate over each word and wrap the front half in <b> tags
+  const transformedWords = words.map(word => {
+    const regex = /[\w']+/g;
+    const matches = word.matchAll(regex);
+    let result = '';
+    let i = 0;
+    for(const match of matches) {
+      const startIndex = match.index;
+      const matchLength = match[0].length;
+      const halfLength = Math.floor(matchLength * RATIO);
+      const frontHalf = word.slice(startIndex, startIndex + halfLength);
+      const backHalf = word.slice(startIndex + halfLength, startIndex + matchLength);
+      result += `${word.slice(i, startIndex)}<b>${frontHalf}</b>${backHalf}`
+      i = startIndex + matchLength;
+    }
+    result += word.slice(i, word.length);
+    return result;
+  });
+
+  // Join the transformed words back into a paragraph
+  const result = transformedWords.join(' ');
+  console.log("RESULTS: ", result);
+  return result;
 }
 
 // Update a whole textnode to be bionics reading compatable
@@ -43,11 +74,7 @@ async function processTextNode(textNode) {
     const bionicHTML = await applyBionics(textNode.textContent);
     const tempElement = document.createElement('span');
     tempElement.innerHTML = bionicHTML;
-
-    // while (tempElement.firstChild) {
-    //   textNode.parentNode.insertBefore(tempElement.firstChild, textNode);
-    //   tempElement.removeChild(tempElement.firstChild);
-    // }
+    tempElement.className = "bionicsReadable";
     textNode.parentNode.insertBefore(tempElement, textNode);
     textNode.parentNode.removeChild(textNode);
   }
@@ -55,6 +82,10 @@ async function processTextNode(textNode) {
 
 // Update a node and all it's children to be bionics reading compatable
 async function processNode(node) {
+  console.log(node);
+  if(node.className === "bionicsReadable"){
+    return;
+  }
   if (node.nodeType === Node.TEXT_NODE) {
     await processTextNode(node);
   } else if (node.nodeType === Node.ELEMENT_NODE) {
@@ -65,7 +96,6 @@ async function processNode(node) {
 }
 
 // processNode(document.body);
-console.log("WE HERE__________");
 async function testBionics(text){
   const responseText = await applyBionics(text);
   const newDiv = document.createElement('div');
@@ -81,39 +111,49 @@ async function testBionics(text){
   newDiv.style.zIndex = '1000';
   document.body.insertBefore(newDiv, document.body.firstChild);
 }
-testBionics("If you are reading this, then ReadFaster is active!");
 
-// Test processTextNode
-const testNodeContainer = document.createElement('div');
-const testTextNode = document.createElement('p');
-testTextNode.textContent = "This is a long long long long text, blahblahblahbalh. This is to test to see if processTextNode is working. The first few chracters of every word in this paragraph should be bolded if it is active.";
-testNodeContainer.style.backgroundColor = 'green';
-testNodeContainer.style.border = '2px solid black';
-testNodeContainer.style.padding = '10px';
-testNodeContainer.style.margin = '10px';
-testNodeContainer.style.position = 'fixed';
-testNodeContainer.style.top = '10px';
-testNodeContainer.style.left = '10px';
-testNodeContainer.style.zIndex = '1000';
-testNodeContainer.appendChild(testTextNode);
-document.body.insertBefore(testNodeContainer, document.body.firstChild);
-processNode(testNodeContainer);
 
-// Set up mutator to watch for updates in the DOM tree then run again(for React Apps)
-console.log("selecting the body element...");
-const targetNode = document.querySelector('body'); // The root element where React renders the app)
-console.log("the body element is: ", targetNode);
-console.log(targetNode);
-const observerConfig = { childList: true, subtree: true };
+async function main() {
+  // await testBionics("If you are reading this, then ReadFaster is active!");
 
-const observer = new MutationObserver(async (mutationsList) => {
-  console.log("HERE in the cbserver callback functino!");
-  for (const mutation of mutationsList) {
-    await processNode(mutation);
-    // if (mutation.type === 'childList') {
-    //   processNode(mutation);
-    // }
-  }
-});
+  // Test processTextNode
+  const testNodeContainer = document.createElement('div');
+  const testTextNode = document.createElement('p');
+  testTextNode.textContent = "This is a long long long long text, blahblahblahbalh. This is to test to see if processTextNode is working. The first few chracters of every word in this paragraph should be bolded if it is active.";
+  testNodeContainer.style.backgroundColor = 'green';
+  testNodeContainer.style.border = '2px solid black';
+  testNodeContainer.style.padding = '10px';
+  testNodeContainer.style.margin = '10px';
+  testNodeContainer.style.position = 'fixed';
+  testNodeContainer.style.top = '10px';
+  testNodeContainer.style.left = '10px';
+  testNodeContainer.style.zIndex = '1000';
+  testNodeContainer.appendChild(testTextNode);
+  document.body.insertBefore(testNodeContainer, document.body.firstChild);
+  await processNode(testNodeContainer);
 
-observer.observe(targetNode, observerConfig);
+  // Process the entire page within the body tag
+  await processNode(document.body);
+
+  // Set up mutator to watch for updates in the DOM tree then run again(for React Apps)
+  // console.log("selecting the body element...");
+  // const targetNode = document.querySelector('body'); // The root element where React renders the app)
+  // console.log("the body element is: ", targetNode);
+  // console.log("setting up mutation observer");
+  // const observerConfig = { childList: true, subtree: true };
+
+  // const observer = new MutationObserver(async (mutationsList) => {
+  //   observer.disconnect();
+  //   console.log("HERE mutation observer calllback!");
+  //   for (const mutation of mutationsList) {
+  //     if (mutation.type === 'childList') {
+  //       processNode(mutation);
+  //     }
+  //   }
+  //   observer.observe(targetNode, observerConfig);
+  // });
+
+  // observer.observe(targetNode, observerConfig);
+}
+
+main();
